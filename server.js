@@ -5,19 +5,17 @@ const server = http.createServer();
 
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_ORIGIN,
+    origin: '*',
     methods: ['GET', 'POST']
   }
 });
 
-const rooms = new Map(); // roomId -> { players: [{socketId, name}], gameState: object | null }
+const rooms = new Map();
 
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
   socket.on('join-room', ({ roomId, playerName }, callback) => {
-    // If the room name or player name is entirely an integer/number, reject it
-    
     if (!isNaN(playerName) && String(playerName).trim() !== '') {
       if (callback) callback({ error: 'שם שחקן לא יכול להיות מספר בלבד' });
       return;
@@ -25,13 +23,10 @@ io.on('connection', (socket) => {
 
     if (rooms.has(roomId)) {
        const roomData = rooms.get(roomId);
-       // Reject if game already started
        if (roomData.gameState && roomData.gameState.phase !== 'setup' && roomData.gameState.phase !== 'waiting') {
            if (callback) callback({ error: 'החדר כבר פעיל במשחק! לא ניתן להצטרף לחדר קיים שכבר התחיל' });
            return;
        }
-       
-       // Reject if name is already taken in the room
        const isNameTaken = roomData.players.some(p => p.name === playerName && p.socketId !== socket.id);
        if (isNameTaken) {
            if (callback) callback({ error: 'השם הזה כבר תפוס בחדר' });
@@ -47,7 +42,6 @@ io.on('connection', (socket) => {
 
     const roomData = rooms.get(roomId);
     
-    // Check if player already in room
     const existingPlayerIndex = roomData.players.findIndex(p => p.socketId === socket.id);
     if (existingPlayerIndex === -1) {
         roomData.players.push({ socketId: socket.id, name: playerName });
@@ -67,13 +61,19 @@ io.on('connection', (socket) => {
     const roomData = rooms.get(roomId);
     if (roomData) {
       roomData.gameState = G;
-      // Broadcast to everyone in the room except the sender
       socket.to(roomId).emit('game-updated', G);
     }
   });
 
+  socket.on('trade-request', ({ toSocketId, tradeOffer }) => {
+    io.to(toSocketId).emit('trade-request', tradeOffer);
+  });
+
+  socket.on('trade-response', ({ toSocketId, accepted }) => {
+    io.to(toSocketId).emit('trade-response', { accepted });
+  });
+
   socket.on('disconnecting', () => {
-    // remove player from any rooms they were in
     for (const roomId of socket.rooms) {
       if (roomId !== socket.id) {
         const roomData = rooms.get(roomId);
